@@ -1,70 +1,118 @@
 pipeline {
     agent any
-    
+
     stages {
-        stage('Create  directory for the WEB Application')        
-       {
+        stage('Mostrar Información del Entorno') {
             steps {
-                //First, drop the directory if exists
-                sh 'rm -rf /home/jenkins/app-web'
-                //Create the directory
-                sh 'mkdir /home/jenkins/app-web'               
+                echo "=== Información del Entorno de Jenkins ==="
+                
+                // Mostrar variables de entorno de Jenkins
+                sh 'echo "Jenkins Home: $JENKINS_HOME"'
+                sh 'echo "Node Name: $NODE_NAME"'
+                sh 'echo "Job Name: $JOB_NAME"'
+                sh 'echo "Build Number: $BUILD_NUMBER"'
+
+                // Usuario que ejecuta el proceso
+                sh 'echo "Usuario del proceso: $(whoami)"'
+                
+                // Mostrar información del sistema operativo
+                sh 'echo "Sistema Operativo:" && uname -a'
+                
+                // Mostrar directorio de trabajo
+                sh 'echo "Directorio de trabajo:" && pwd'
+                
+                // Mostrar espacio en disco
+                sh 'echo "Espacio en disco disponible:" && df -h'
+                
+                // Mostrar memoria
+                sh 'echo "Memoria disponible:" && free -h'
+                
+                // Mostrar variables de entorno completas (opcional)
+                sh 'echo "=== Todas las variables de entorno ===" && printenv'
             }
         }
-        stage('Drop the containers'){   
-            failFast true
-            parallel{ 
+        stage('Configure Docker remote context') {
+            steps {
+                echo 'Configuring Docker remote context...'
+                sh '''
+                  docker context inspect remoto >/dev/null 2>&1 || \
+                  docker context create remoto --docker "host=ssh://pi@192.168.2.4"
+                  docker context use remoto
+                  docker context ls
+                '''
+            }
+        }
+        stage('Drop the Apache Nginx Docker container'){
+            parallel{
                 stage('Drop apache container'){
                     steps {
-                        echo 'droping the Apache container...'
-                        sh 'ocker rm -f app-web-apache'
+                        sh 'docker rm -f apache'
                     }
                 }
-                stage('Drop Nginx Container'){
-                    steps{
-                        echo 'droping the Nginx container...'
-                        sh 'docker rm -f app-web-nginx'
+                stage('Drop nginx container'){
+                    steps {
+                        sh 'docker rm -f nginx'
                     }
-                }           
+                }
             }
         }
-        //Creating the containers in Parallel
         stage('Create the containers in Parallel') {
             parallel{
-                stage('Create the Apache container')
-                {           
+                stage('Create the Apache httpd container') {
                     steps {
-                    echo 'Creating the Apache Container...'
-                    sh 'docker run -dit --name app-web-apache -p 9100:80  -v /home/jenkins/app-web:/usr/local/apache2/htdocs/ httpd'
+                        echo 'Creating the container...'
+                        sh '''
+                        docker run -dit \
+                        --name apache \
+                        -p 9100:80 \
+                        -v $WORKSPACE/web:/usr/local/apache2/htdocs/ \
+                        httpd
+                    '''
                     }
                 }
-                stage('Create the Nginx container') {
-                   steps {
-                   echo 'Creating the Apache container...'
-                   sh 'docker run -dit --name app-web-nginx -p 9200:80  -v /home/jenkins/app-web:/usr/share/nginx/html nginx'         
-                   }
-                }       
-            }   
+                stage('Create the Apache Nginx container') {
+                    steps {
+                        echo 'Creating the container...'
+                        sh '''
+                        docker run -dit \
+                        --name nginx \
+                        -p 9200:80 \
+                        -v $WORKSPACE/web:/usr/share/nginx/html/ \
+                        nginx
+                        '''
+                    }
+                }
+            }
         }
-        //Copy the application   
-        stage('Copy the web application to the container directory') {
-            steps {
-                echo 'Copying web application...'             
-                sh 'cp -r web/* /home/jenkins/app-web'
+        stage('Copy files into path in Parallel'){
+            parallel{
+                stage('Copy web files into container Apache') {
+                    steps {
+                        sh 'docker cp $WORKSPACE/web/. apache:/usr/local/apache2/htdocs/'
+                    }
+                }
+                stage('Copy web files into container Nginx') {
+                    steps {
+                        sh 'docker cp $WORKSPACE/web/. nginx:/usr/share/nginx/html/'
+                    }
+                }
             }
         }
     }
-
-    post {              
-        success {
-        // One or more steps need to be included within each condition's block.
-          echo 'The deployment in Nginx and Apache has worked'
-          archiveArtifacts allowEmptyArchive: true, artifacts: 'web/*', followSymlinks: false
-          cleanWs()         
-       }
-       failure {
-        // One or more steps need to be included within each condition's block.
-        echo 'An error has ocurred in the deploy'       
-       }
-    }
+    post {
+          cleanup {
+            // One or more steps need to be included within each condition's block.
+              echo 'cleanup process'
+          }
+          success {
+            // One or more steps need to be included within each condition's block.
+              echo 'success process'
+              archiveArtifacts allowEmptyArchive: true, artifacts: 'web/*.html', followSymlinks: false
+              cleanWs()   
+          }
+          failure {
+            // One or more steps need to be included within each condition's block.
+              echo 'failure process'
+          }
+        }
 }
