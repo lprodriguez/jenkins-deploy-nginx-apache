@@ -64,7 +64,7 @@ pipeline {
                         sh '''
                         docker run -dit \
                         --name apache \
-                        -p 9100:80 \
+                        -p 9101:80 \
                         -v $WORKSPACE/web:/usr/local/apache2/htdocs/ \
                         httpd
                     '''
@@ -76,7 +76,7 @@ pipeline {
                         sh '''
                         docker run -dit \
                         --name nginx \
-                        -p 9200:80 \
+                        -p 9102:80 \
                         -v $WORKSPACE/web:/usr/share/nginx/html/ \
                         nginx
                         '''
